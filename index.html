@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>ETH + PTAX (Escolha após consulta)</title>
+  <title>ETH + PTAX (Parcial)</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -62,7 +62,7 @@
       margin: 5px 0;
     }
     .highlight-usd {
-      color: #276EF1; /* azul */
+      color: #276EF1; /* Azul para o USD */
     }
     .ptax-info {
       margin-top: 10px;
@@ -98,10 +98,15 @@
       border: 1px solid #ccc;
     }
     .highlight-brl {
-      color: #2E7D32; /* verde */
+      color: #2E7D32; /* Verde para o BRL */
       font-size: 18px;
       font-weight: bold;
       margin: 5px 0;
+    }
+    .ptax-warning {
+      color: #d8000c;
+      margin-top: 10px;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -129,8 +134,7 @@
         Usar PTAX Compra
       </label>
       <label>
-        <!-- 'Venda' marcado por padrão -->
-        <input type="checkbox" id="cbVenda" checked>
+        <input type="checkbox" id="cbVenda">
         Usar PTAX Venda
       </label>
     </div>
@@ -140,11 +144,12 @@
   </div>
 
   <script>
-    let globalEthUsd = 0;       // Preço do ETH em USD (definido no 'Consultar')
-    let globalPtaxCompra = 0;   // PTAX compra do dia
-    let globalPtaxVenda = 0;    // PTAX venda do dia
+    let globalEthUsd = 0;       // Preço do ETH em USD
+    let globalPtaxCompra = 0;   // PTAX compra
+    let globalPtaxVenda = 0;    // PTAX venda
+    let ptaxDisponivel = false; // Indica se a PTAX do dia foi encontrada
 
-    // 1) Buscar preço ETH/USD via CoinGecko (±1h em torno do timestamp)
+    // 1) Buscar preço ETH/USD via CoinGecko (±1h)
     async function fetchEthPrice(chosenTimestamp) {
       const from = chosenTimestamp - 3600;
       const to   = chosenTimestamp + 3600;
@@ -152,7 +157,7 @@
       const url = `https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=${from}&to=${to}`;
       const response = await fetch(url);
       if (!response.ok) {
-        throw new Error("Falha ao buscar dados do CoinGecko");
+        throw new Error("Falha ao buscar dados do CoinGecko.");
       }
       const data = await response.json();
 
@@ -173,7 +178,7 @@
       return closestPrice;
     }
 
-    // 2) Buscar cotação de compra e venda do Dólar PTAX (Banco Central)
+    // 2) Buscar cotação de compra/venda do Dólar PTAX (Banco Central)
     async function fetchDolarPtax(dateVal) {
       // A API do BCB espera mm-dd-yyyy, entre aspas
       const [yyyy, mm, dd] = dateVal.split("-");
@@ -189,51 +194,58 @@
       const bcbData = await response.json();
 
       if (!bcbData.value || bcbData.value.length === 0) {
-        throw new Error("Não há cotação PTAX para esta data (fim de semana/feriado?).");
+        // Retorna null para indicar que não há PTAX
+        return null;
       }
-
       // Retorna objeto com { cotacaoCompra, cotacaoVenda, dataHoraCotacao, ... }
       return bcbData.value[0];
     }
 
-    // 3) Atualiza a exibição dos resultados em BRL, considerando qual checkbox está marcado
+    // 3) Atualiza a exibição dos resultados de conversão para BRL
     function updateConversionResults() {
       const cbCompra = document.getElementById("cbCompra");
       const cbVenda  = document.getElementById("cbVenda");
       const resultsDiv = document.getElementById("calcResults");
 
-      // Lógica para garantir exclusividade (marca um, desmarca o outro):
-      if (this.id === "cbCompra" && cbCompra.checked) {
-        cbVenda.checked = false;
-      } else if (this.id === "cbVenda" && cbVenda.checked) {
-        cbCompra.checked = false;
-      }
-
+      // Limpa a div antes de recalcular
       resultsDiv.innerHTML = "";
 
-      // Verifica qual checkbox está marcado
+      // Se não temos PTAX, não exibimos nada em BRL
+      if (!ptaxDisponivel) {
+        return;
+      }
+
+      // Se nenhuma checkbox estiver marcada, não mostra nada
+      if (!cbCompra.checked && !cbVenda.checked) {
+        return;
+      }
+
+      let outputHtml = "";
+
+      // Se a PTAX compra estiver marcada
       if (cbCompra.checked) {
-        // Usa PTAX compra
         const ethBrlCompra = globalEthUsd * globalPtaxCompra;
-        resultsDiv.innerHTML = `
+        outputHtml += `
           <div class="highlight-brl">
             1 ETH em BRL (compra): R$ ${ethBrlCompra.toFixed(2)}
           </div>
         `;
-      } 
-      else if (cbVenda.checked) {
-        // Usa PTAX venda
+      }
+
+      // Se a PTAX venda estiver marcada
+      if (cbVenda.checked) {
         const ethBrlVenda = globalEthUsd * globalPtaxVenda;
-        resultsDiv.innerHTML = `
+        outputHtml += `
           <div class="highlight-brl">
             1 ETH em BRL (venda): R$ ${ethBrlVenda.toFixed(2)}
           </div>
         `;
       }
-      // Se nenhum estiver marcado (caso improvável), fica vazio
+
+      resultsDiv.innerHTML = outputHtml;
     }
 
-    // 4) Lida com o clique do botão "Consultar"
+    // 4) Botão "Consultar"
     document.getElementById("checkPriceBtn").addEventListener("click", async () => {
       const errorDiv = document.getElementById("errorOutput");
       const resultDiv = document.getElementById("resultContainer");
@@ -246,6 +258,7 @@
       basicInfoDiv.innerHTML = "";
       checkboxesContainer.style.display = "none";
       calcResultsDiv.innerHTML = "";
+      ptaxDisponivel = false;
 
       const dateVal = document.getElementById("dateInput").value;
       const timeVal = document.getElementById("timeInput").value;
@@ -265,48 +278,63 @@
       const chosenTimestamp = Math.floor(dateObj.getTime() / 1000);
 
       try {
-        // 4.1) Preço ETH/USD
+        // 4.1) Busca ETH/USD
         globalEthUsd = await fetchEthPrice(chosenTimestamp);
 
-        // 4.2) PTAX (compra + venda)
+        // 4.2) Tenta buscar PTAX do dia
         const ptaxData = await fetchDolarPtax(dateVal);
-        globalPtaxCompra = ptaxData.cotacaoCompra;
-        globalPtaxVenda  = ptaxData.cotacaoVenda;
 
-        // 4.3) Monta informações básicas
+        // Montamos as infos iniciais
         const localDateTimeStr = dateObj.toLocaleString();
-        const infoHtml = `
+        let infoHtml = `
           <div class="date-time-info">
             Data/hora selecionada: ${localDateTimeStr}
           </div>
           <div class="highlight highlight-usd">
             ETH em USD: $${globalEthUsd.toFixed(2)}
           </div>
-          <div class="ptax-info">
-            <div class="ptax-values">
-              Dólar PTAX compra: R$ ${globalPtaxCompra.toFixed(4)}<br>
-              Dólar PTAX venda: R$ ${globalPtaxVenda.toFixed(4)}
-            </div>
-            <div class="approx-info">
-              (PTAX é diária, sem granularidade de hora)
-            </div>
-          </div>
         `;
+
+        if (ptaxData) {
+          // Se achou PTAX
+          globalPtaxCompra = ptaxData.cotacaoCompra;
+          globalPtaxVenda  = ptaxData.cotacaoVenda;
+          ptaxDisponivel   = true;
+
+          infoHtml += `
+            <div class="ptax-info">
+              <div class="ptax-values">
+                Dólar PTAX compra: R$ ${globalPtaxCompra.toFixed(4)}<br>
+                Dólar PTAX venda: R$ ${globalPtaxVenda.toFixed(4)}
+              </div>
+              <div class="approx-info">
+                (PTAX é diária, sem granularidade de hora)
+              </div>
+            </div>
+          `;
+
+          // Exibe checkboxes, pois temos PTAX
+          checkboxesContainer.style.display = "flex";
+        } else {
+          // Não achou PTAX
+          infoHtml += `
+            <p class="ptax-warning">
+              Não foi encontrada PTAX para esta data (pode ser fim de semana/feriado).<br>
+              A conversão em BRL não está disponível.
+            </p>
+          `;
+          ptaxDisponivel = false;
+        }
+
+        // Exibe resultados
         basicInfoDiv.innerHTML = infoHtml;
-
-        // 4.4) Exibe container e checkboxes
         resultDiv.style.display = "block";
-        checkboxesContainer.style.display = "flex";
-
-        // Já que "venda" vem checked por default, chamamos o update
-        updateConversionResults.call(document.getElementById("cbVenda"));
-
       } catch (err) {
         errorDiv.textContent = err.message;
       }
     });
 
-    // 5) Sempre que o usuário marcar/desmarcar, forçamos exclusividade e recalculamos
+    // 5) Se o usuário marcar/desmarcar checkboxes, atualiza conversão
     document.getElementById("cbCompra").addEventListener("change", updateConversionResults);
     document.getElementById("cbVenda").addEventListener("change", updateConversionResults);
   </script>
