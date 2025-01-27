@@ -1,129 +1,314 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8"/>
-  <title>ETH Price Checker</title>
+  <meta charset="UTF-8">
+  <title>ETH + PTAX (Escolha após consulta)</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
-      max-width: 400px;
+      max-width: 600px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
     }
     label {
       display: block;
-      margin-top: 10px;
+      margin: 10px 0 5px;
+      font-weight: bold;
     }
     input[type="date"],
     input[type="time"] {
-      margin: 5px 0;
-      padding: 5px;
-      width: 100%;
+      width: 220px;
+      padding: 7px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
     }
     button {
-      display: block;
-      margin-top: 10px;
-      padding: 10px 20px;
       background-color: #4CAF50;
       color: #fff;
+      padding: 10px 20px;
       border: none;
       cursor: pointer;
+      border-radius: 4px;
+      font-size: 16px;
     }
     button:hover {
       background-color: #45a049;
     }
-    .result {
-      margin-top: 20px;
+    .error {
+      color: #d8000c;
       font-weight: bold;
+      margin-top: 20px;
+    }
+    .result {
+      margin-top: 25px;
+      padding: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background-color: #f9f9f9;
+    }
+    .date-time-info {
+      font-size: 14px;
+      margin-bottom: 10px;
+      color: #666;
+    }
+    .highlight {
+      display: inline-block;
+      font-size: 20px;
+      font-weight: bold;
+      margin: 5px 0;
+    }
+    .highlight-usd {
+      color: #276EF1; /* azul */
+    }
+    .ptax-info {
+      margin-top: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background-color: #fff;
+      padding: 10px;
+    }
+    .ptax-values {
+      font-size: 16px;
+    }
+    .approx-info {
+      font-size: 12px;
+      color: #999;
+      margin-top: 10px;
+    }
+    .checkboxes-container {
+      margin-top: 10px;
+      display: flex;
+      gap: 15px;
+    }
+    .checkboxes-container label {
+      font-weight: normal;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .calculation-results {
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #eef;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    .highlight-brl {
+      color: #2E7D32; /* verde */
+      font-size: 18px;
+      font-weight: bold;
+      margin: 5px 0;
     }
   </style>
 </head>
 <body>
-  <h1>ETH Price Checker</h1>
-  
-  <label for="dateInput">Selecione a Data:</label>
-  <input type="date" id="dateInput" />
-  
-  <label for="timeInput">Selecione o Horário:</label>
-  <input type="time" id="timeInput" />
-  
-  <button id="checkPriceBtn">Obter Preço</button>
 
-  <div class="result" id="priceResult"></div>
-  
+  <h1>ETH + PTAX</h1>
+
+  <label for="dateInput">Data (AAAA-MM-DD)</label>
+  <input type="date" id="dateInput">
+
+  <label for="timeInput">Hora (HH:MM)</label>
+  <input type="time" id="timeInput">
+
+  <button id="checkPriceBtn">Consultar</button>
+
+  <div class="error" id="errorOutput"></div>
+
+  <div class="result" id="resultContainer" style="display: none;">
+    <div id="basicInfo"></div>
+    
+    <!-- Exibe checkboxes para compra/venda --> 
+    <div class="checkboxes-container" id="checkboxesContainer" style="display: none;">
+      <label>
+        <input type="checkbox" id="cbCompra">
+        Usar PTAX Compra
+      </label>
+      <label>
+        <!-- 'Venda' marcado por padrão -->
+        <input type="checkbox" id="cbVenda" checked>
+        Usar PTAX Venda
+      </label>
+    </div>
+
+    <!-- Onde mostra o resultado de cada cálculo -->
+    <div class="calculation-results" id="calcResults"></div>
+  </div>
+
   <script>
-    document.getElementById("checkPriceBtn").addEventListener("click", function() {
-      // Pega os valores dos inputs
+    let globalEthUsd = 0;       // Preço do ETH em USD (definido no 'Consultar')
+    let globalPtaxCompra = 0;   // PTAX compra do dia
+    let globalPtaxVenda = 0;    // PTAX venda do dia
+
+    // 1) Buscar preço ETH/USD via CoinGecko (±1h em torno do timestamp)
+    async function fetchEthPrice(chosenTimestamp) {
+      const from = chosenTimestamp - 3600;
+      const to   = chosenTimestamp + 3600;
+
+      const url = `https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=${from}&to=${to}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error("Falha ao buscar dados do CoinGecko");
+      }
+      const data = await response.json();
+
+      if (!data || !data.prices || data.prices.length === 0) {
+        throw new Error("Nenhum dado de preço do ETH encontrado para o período.");
+      }
+
+      let closestPrice = null;
+      let minDiff = Infinity;
+      data.prices.forEach(([tsMs, priceUsd]) => {
+        const tsSec = Math.floor(tsMs / 1000);
+        const diff = Math.abs(tsSec - chosenTimestamp);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestPrice = priceUsd;
+        }
+      });
+      return closestPrice;
+    }
+
+    // 2) Buscar cotação de compra e venda do Dólar PTAX (Banco Central)
+    async function fetchDolarPtax(dateVal) {
+      // A API do BCB espera mm-dd-yyyy, entre aspas
+      const [yyyy, mm, dd] = dateVal.split("-");
+      const bcbDateStr = `'${mm}-${dd}-${yyyy}'`;
+
+      const bcbUrl = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/` +
+                     `CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao=${bcbDateStr}&$format=json`;
+
+      const response = await fetch(bcbUrl);
+      if (!response.ok) {
+        throw new Error("Falha ao buscar dados do Banco Central (PTAX).");
+      }
+      const bcbData = await response.json();
+
+      if (!bcbData.value || bcbData.value.length === 0) {
+        throw new Error("Não há cotação PTAX para esta data (fim de semana/feriado?).");
+      }
+
+      // Retorna objeto com { cotacaoCompra, cotacaoVenda, dataHoraCotacao, ... }
+      return bcbData.value[0];
+    }
+
+    // 3) Atualiza a exibição dos resultados em BRL, considerando qual checkbox está marcado
+    function updateConversionResults() {
+      const cbCompra = document.getElementById("cbCompra");
+      const cbVenda  = document.getElementById("cbVenda");
+      const resultsDiv = document.getElementById("calcResults");
+
+      // Lógica para garantir exclusividade (marca um, desmarca o outro):
+      if (this.id === "cbCompra" && cbCompra.checked) {
+        cbVenda.checked = false;
+      } else if (this.id === "cbVenda" && cbVenda.checked) {
+        cbCompra.checked = false;
+      }
+
+      resultsDiv.innerHTML = "";
+
+      // Verifica qual checkbox está marcado
+      if (cbCompra.checked) {
+        // Usa PTAX compra
+        const ethBrlCompra = globalEthUsd * globalPtaxCompra;
+        resultsDiv.innerHTML = `
+          <div class="highlight-brl">
+            1 ETH em BRL (compra): R$ ${ethBrlCompra.toFixed(2)}
+          </div>
+        `;
+      } 
+      else if (cbVenda.checked) {
+        // Usa PTAX venda
+        const ethBrlVenda = globalEthUsd * globalPtaxVenda;
+        resultsDiv.innerHTML = `
+          <div class="highlight-brl">
+            1 ETH em BRL (venda): R$ ${ethBrlVenda.toFixed(2)}
+          </div>
+        `;
+      }
+      // Se nenhum estiver marcado (caso improvável), fica vazio
+    }
+
+    // 4) Lida com o clique do botão "Consultar"
+    document.getElementById("checkPriceBtn").addEventListener("click", async () => {
+      const errorDiv = document.getElementById("errorOutput");
+      const resultDiv = document.getElementById("resultContainer");
+      const basicInfoDiv = document.getElementById("basicInfo");
+      const checkboxesContainer = document.getElementById("checkboxesContainer");
+      const calcResultsDiv = document.getElementById("calcResults");
+
+      errorDiv.textContent = "";
+      resultDiv.style.display = "none";
+      basicInfoDiv.innerHTML = "";
+      checkboxesContainer.style.display = "none";
+      calcResultsDiv.innerHTML = "";
+
       const dateVal = document.getElementById("dateInput").value;
       const timeVal = document.getElementById("timeInput").value;
 
       if (!dateVal || !timeVal) {
-        alert("Por favor, selecione a data e o horário.");
+        errorDiv.textContent = "Por favor, selecione a data e a hora.";
         return;
       }
 
-      // Constrói uma string no padrão ISO para criar o objeto Date
-      const dateTimeStr = dateVal + "T" + timeVal + ":00";
+      const dateTimeStr = `${dateVal}T${timeVal}:00`;
       const dateObj = new Date(dateTimeStr);
-
       if (isNaN(dateObj.getTime())) {
-        alert("Data ou hora inválida.");
+        errorDiv.textContent = "Data ou hora inválida.";
         return;
       }
 
-      // Converte para Unix Timestamp (em segundos)
       const chosenTimestamp = Math.floor(dateObj.getTime() / 1000);
 
-      // Definimos um intervalo de 1 hora antes e 1 hora depois
-      const from = chosenTimestamp - 3600;
-      const to   = chosenTimestamp + 3600;
+      try {
+        // 4.1) Preço ETH/USD
+        globalEthUsd = await fetchEthPrice(chosenTimestamp);
 
-      // Monta a URL do CoinGecko (ETH = "ethereum", vs_currency = "usd")
-      // https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=...&to=...
-      const url = `https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=${from}&to=${to}`;
+        // 4.2) PTAX (compra + venda)
+        const ptaxData = await fetchDolarPtax(dateVal);
+        globalPtaxCompra = ptaxData.cotacaoCompra;
+        globalPtaxVenda  = ptaxData.cotacaoVenda;
 
-      // Faz a requisição Fetch
-      fetch(url)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error("Erro na resposta da API: " + response.statusText);
-          }
-          return response.json();
-        })
-        .then(data => {
-          if (!data || !data.prices || data.prices.length === 0) {
-            document.getElementById("priceResult").textContent = 
-              "Não foram encontrados dados para esse intervalo.";
-            return;
-          }
+        // 4.3) Monta informações básicas
+        const localDateTimeStr = dateObj.toLocaleString();
+        const infoHtml = `
+          <div class="date-time-info">
+            Data/hora selecionada: ${localDateTimeStr}
+          </div>
+          <div class="highlight highlight-usd">
+            ETH em USD: $${globalEthUsd.toFixed(2)}
+          </div>
+          <div class="ptax-info">
+            <div class="ptax-values">
+              Dólar PTAX compra: R$ ${globalPtaxCompra.toFixed(4)}<br>
+              Dólar PTAX venda: R$ ${globalPtaxVenda.toFixed(4)}
+            </div>
+            <div class="approx-info">
+              (PTAX é diária, sem granularidade de hora)
+            </div>
+          </div>
+        `;
+        basicInfoDiv.innerHTML = infoHtml;
 
-          // data.prices é um array de [timestampEmMs, preco]
-          // Vamos achar o ponto mais próximo do chosenTimestamp
-          let closestPrice = null;
-          let minDiff = Infinity;
+        // 4.4) Exibe container e checkboxes
+        resultDiv.style.display = "block";
+        checkboxesContainer.style.display = "flex";
 
-          data.prices.forEach(([tsMs, price]) => {
-            // tsMs vem em milissegundos; convertemos para segundos
-            const tsSec = Math.floor(tsMs / 1000);
-            const diff = Math.abs(tsSec - chosenTimestamp);
-            if (diff < minDiff) {
-              minDiff = diff;
-              closestPrice = price;
-            }
-          });
+        // Já que "venda" vem checked por default, chamamos o update
+        updateConversionResults.call(document.getElementById("cbVenda"));
 
-          if (closestPrice !== null) {
-            document.getElementById("priceResult").textContent =
-              `ETH em ${dateObj.toLocaleString()} ~ U$ ${closestPrice.toFixed(2)}`;
-          } else {
-            document.getElementById("priceResult").textContent = 
-              "Não foram encontrados dados para esse horário.";
-          }
-        })
-        .catch(error => {
-          document.getElementById("priceResult").textContent = 
-            "Erro ao buscar dados: " + error.message;
-        });
+      } catch (err) {
+        errorDiv.textContent = err.message;
+      }
     });
+
+    // 5) Sempre que o usuário marcar/desmarcar, forçamos exclusividade e recalculamos
+    document.getElementById("cbCompra").addEventListener("change", updateConversionResults);
+    document.getElementById("cbVenda").addEventListener("change", updateConversionResults);
   </script>
 </body>
 </html>
