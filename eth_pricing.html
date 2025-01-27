@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>ETH Price Checker</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      max-width: 400px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+    }
+    input[type="date"],
+    input[type="time"] {
+      margin: 5px 0;
+      padding: 5px;
+      width: 100%;
+    }
+    button {
+      display: block;
+      margin-top: 10px;
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    .result {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>ETH Price Checker</h1>
+  
+  <label for="dateInput">Selecione a Data:</label>
+  <input type="date" id="dateInput" />
+  
+  <label for="timeInput">Selecione o Horário:</label>
+  <input type="time" id="timeInput" />
+  
+  <button id="checkPriceBtn">Obter Preço</button>
+
+  <div class="result" id="priceResult"></div>
+  
+  <script>
+    document.getElementById("checkPriceBtn").addEventListener("click", function() {
+      // Pega os valores dos inputs
+      const dateVal = document.getElementById("dateInput").value;
+      const timeVal = document.getElementById("timeInput").value;
+
+      if (!dateVal || !timeVal) {
+        alert("Por favor, selecione a data e o horário.");
+        return;
+      }
+
+      // Constrói uma string no padrão ISO para criar o objeto Date
+      const dateTimeStr = dateVal + "T" + timeVal + ":00";
+      const dateObj = new Date(dateTimeStr);
+
+      if (isNaN(dateObj.getTime())) {
+        alert("Data ou hora inválida.");
+        return;
+      }
+
+      // Converte para Unix Timestamp (em segundos)
+      const chosenTimestamp = Math.floor(dateObj.getTime() / 1000);
+
+      // Definimos um intervalo de 1 hora antes e 1 hora depois
+      const from = chosenTimestamp - 3600;
+      const to   = chosenTimestamp + 3600;
+
+      // Monta a URL do CoinGecko (ETH = "ethereum", vs_currency = "usd")
+      // https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=...&to=...
+      const url = `https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range?vs_currency=usd&from=${from}&to=${to}`;
+
+      // Faz a requisição Fetch
+      fetch(url)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error("Erro na resposta da API: " + response.statusText);
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (!data || !data.prices || data.prices.length === 0) {
+            document.getElementById("priceResult").textContent = 
+              "Não foram encontrados dados para esse intervalo.";
+            return;
+          }
+
+          // data.prices é um array de [timestampEmMs, preco]
+          // Vamos achar o ponto mais próximo do chosenTimestamp
+          let closestPrice = null;
+          let minDiff = Infinity;
+
+          data.prices.forEach(([tsMs, price]) => {
+            // tsMs vem em milissegundos; convertemos para segundos
+            const tsSec = Math.floor(tsMs / 1000);
+            const diff = Math.abs(tsSec - chosenTimestamp);
+            if (diff < minDiff) {
+              minDiff = diff;
+              closestPrice = price;
+            }
+          });
+
+          if (closestPrice !== null) {
+            document.getElementById("priceResult").textContent =
+              `ETH em ${dateObj.toLocaleString()} ~ U$ ${closestPrice.toFixed(2)}`;
+          } else {
+            document.getElementById("priceResult").textContent = 
+              "Não foram encontrados dados para esse horário.";
+          }
+        })
+        .catch(error => {
+          document.getElementById("priceResult").textContent = 
+            "Erro ao buscar dados: " + error.message;
+        });
+    });
+  </script>
+</body>
+</html>
